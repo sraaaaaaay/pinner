@@ -7,5 +7,11 @@
 !/cmd
 !/cmd/*
 !/LICENSE
+
 !/.claude-plugin
-!/.claude-plugin/*
+!/.claude-plugin/marketplace.json
+!/.claude-plugin/plugin.json
+
+!/skills
+!/skills/pinner
+!/skills/pinner/SKILL.md
