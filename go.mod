@@ -1,4 +1,4 @@
-module pinner
+module github.com/sraaaaaaay/pinner
 
 go 1.26.3
 

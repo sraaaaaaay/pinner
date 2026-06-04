@@ -1,6 +1,6 @@
 package main
 
-import "pinner/cmd"
+import "github.com/sraaaaaaay/pinner/cmd"
 
 func main() {
 	cmd.Execute()

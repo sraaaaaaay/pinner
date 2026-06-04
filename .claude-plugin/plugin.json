@@ -1,0 +1,9 @@
+{
+  "name": "pinner",
+  "description": "Command-line tool to curate a collection of retrievable code snippets.",
+  "version": "1.0.0",
+  "author": {
+    "name": "sraaaaaaay",
+    "url": "https://github.com/sraaaaaaay"
+  }
+}

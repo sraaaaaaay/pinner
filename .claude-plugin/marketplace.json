@@ -1,0 +1,16 @@
+{
+  "name": "pinner",
+  "description": "Hand-curate a collection of retrievable code snippets for your coding agents.",
+  "owner": {
+    "name": "sraaaaaaay",
+    "url": "https://github.com/sraaaaaaay"
+  },
+  "plugins": [
+    {
+      "name": "pinner",
+      "source": "./",
+      "description": "Hand-curate a collection of retrievable code snippets for your coding agents.",
+      "category": "rag"
+    }
+  ]
+}

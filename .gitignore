@@ -7,3 +7,5 @@
 !/cmd
 !/cmd/*
 !/LICENSE
+!/.claude-plugin
+!/.claude-plugin/*
