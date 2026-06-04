@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
@@ -51,7 +52,7 @@ type filesource struct {
 func pin(cmd *cobra.Command, args []string) {
 	name := args[0]
 
-	dir := fmt.Sprintf("pins/%s", name)
+	dir := fmt.Sprintf("%s/%s", PIN_DIR, name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -70,10 +71,13 @@ func pin(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	err = os.WriteFile(fmt.Sprintf("pins/%s/PIN.md", name), fmt.Appendf(nil, "---\n%s---", yaml), 0644)
+	err = os.WriteFile(fmt.Sprintf("%s/%s/%s", PIN_DIR, name, PIN_FILE), fmt.Appendf(nil, "---\n%s---", yaml), 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// After adding, re-index
+	indexCmd.Run(cmd, args)
 }
 
 func getKeywords(name string) []byte {
@@ -86,35 +90,53 @@ func getKeywords(name string) []byte {
 
 func createCopies(dir string, fileArgs []string) {
 	for _, file := range fileArgs {
-		dst := filepath.Join(dir, filepath.Base(filepath.Dir(file)), filepath.Base(file))
-		if err := copyFile(file, dst); err != nil {
+		// Reference copies are wrapped in markdown so they never carry a real
+		// source extension and can't be swept into code output, builds, or lint.
+		dst := filepath.Join(dir, filepath.Base(filepath.Dir(file)), filepath.Base(file)+".md")
+		if err := copyAsMarkdown(file, dst); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+func copyAsMarkdown(src, dst string) error {
+	content, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
+	return os.WriteFile(dst, asMarkdown(src, content), 0644)
+}
 
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
+func asMarkdown(src string, content []byte) []byte {
+	lang := strings.TrimPrefix(filepath.Ext(src), ".")
+	fence := strings.Repeat("`", max(3, longestBacktickRun(content)+1))
 
-	return out.Close()
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "%s%s\n", fence, lang)
+	b.Write(content)
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(&b, "%s\n", fence)
+	return b.Bytes()
+}
+
+func longestBacktickRun(content []byte) int {
+	longest, run := 0, 0
+	for _, c := range content {
+		if c == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	return longest
 }
 
 func getFilesources(fileArgs []string) []filesource {
@@ -133,7 +155,7 @@ func getFilesources(fileArgs []string) []filesource {
 		}
 
 		files = append(files, filesource{
-			Source: file,
+			Source: file + ".md",
 			Sha256: hex.EncodeToString(hasher.Sum(nil)),
 		})
 
