@@ -57,9 +57,10 @@ func pin(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
+	names := dedupeNames(args[1:])
 	kw := getKeywords(name)
-	files := getFilesources(args[1:])
-	createCopies(dir, args[1:])
+	files := getFilesources(args[1:], name, names)
+	createCopies(dir, args[1:], names)
 
 	fm := frontmatter{
 		Keywords: string(kw),
@@ -88,15 +89,31 @@ func getKeywords(name string) []byte {
 	return bytes.TrimSpace(kw)
 }
 
-func createCopies(dir string, fileArgs []string) {
-	for _, file := range fileArgs {
-		// Reference copies are wrapped in markdown so they never carry a real
-		// source extension and can't be swept into code output, builds, or lint.
-		dst := filepath.Join(dir, filepath.Base(filepath.Dir(file)), filepath.Base(file)+".md")
+func createCopies(dir string, fileArgs []string, names []string) {
+	for i, file := range fileArgs {
+		dst := filepath.Join(dir, names[i]+".md")
 		if err := copyAsMarkdown(file, dst); err != nil {
 			log.Fatal(err)
 		}
 	}
+}
+
+func dedupeNames(fileArgs []string) []string {
+	counts := map[string]int{}
+	for _, file := range fileArgs {
+		counts[filepath.Base(file)]++
+	}
+
+	names := make([]string, len(fileArgs))
+	for i, file := range fileArgs {
+		base := filepath.Base(file)
+		if counts[base] > 1 {
+			names[i] = filepath.Join(filepath.Base(filepath.Dir(file)), base)
+		} else {
+			names[i] = base
+		}
+	}
+	return names
 }
 
 func copyAsMarkdown(src, dst string) error {
@@ -139,11 +156,11 @@ func longestBacktickRun(content []byte) int {
 	return longest
 }
 
-func getFilesources(fileArgs []string) []filesource {
+func getFilesources(fileArgs []string, name string, names []string) []filesource {
 	files := []filesource{}
 	hasher := sha256.New()
 
-	for _, file := range fileArgs {
+	for i, file := range fileArgs {
 		f, err := os.Open(file)
 		if err != nil {
 			log.Fatal(err)
@@ -155,7 +172,7 @@ func getFilesources(fileArgs []string) []filesource {
 		}
 
 		files = append(files, filesource{
-			Source: file + ".md",
+			Source: "./" + filepath.ToSlash(filepath.Join(PIN_DIR, name, names[i]+".md")),
 			Sha256: hex.EncodeToString(hasher.Sum(nil)),
 		})
 
