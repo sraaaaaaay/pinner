@@ -1,0 +1,9 @@
+*
+
+!/main.go
+!/go.mod
+!/go.sum
+!/.gitignore
+!/cmd
+!/cmd/*
+!/LICENSE
