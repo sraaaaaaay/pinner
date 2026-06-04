@@ -51,8 +51,8 @@ func index(cmd *cobra.Command, args []string) {
 			}
 
 			for _, f := range fm.Files {
-				if !slices.Contains(index[kw], f.Source) {
-					index[kw] = append(index[kw], f.Source)
+				if !slices.Contains(index[kw], f.Snapshot) {
+					index[kw] = append(index[kw], f.Snapshot)
 				}
 			}
 		}

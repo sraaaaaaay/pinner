@@ -44,9 +44,11 @@ type frontmatter struct {
 	Files    []filesource `yaml:"files"`
 }
 
+// todo consider a hunk selector so we only snapshot within a range of line
 type filesource struct {
-	Source string `yaml:"source"`
-	Sha256 string `yaml:"sha256"`
+	Source   string `yaml:"source"`
+	Snapshot string `yaml:"snapshot"`
+	Sha256   string `yaml:"sha256"`
 }
 
 func pin(cmd *cobra.Command, args []string) {
@@ -172,8 +174,9 @@ func getFilesources(fileArgs []string, name string, names []string) []filesource
 		}
 
 		files = append(files, filesource{
-			Source: "./" + filepath.ToSlash(filepath.Join(PIN_DIR, name, names[i]+".md")),
-			Sha256: hex.EncodeToString(hasher.Sum(nil)),
+			Source:   f.Name(),
+			Snapshot: "./" + filepath.ToSlash(filepath.Join(PIN_DIR, name, names[i]+".md")),
+			Sha256:   hex.EncodeToString(hasher.Sum(nil)),
 		})
 
 		hasher.Reset()
