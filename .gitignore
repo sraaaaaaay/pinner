@@ -12,6 +12,6 @@
 !/.claude-plugin/marketplace.json
 !/.claude-plugin/plugin.json
 
-!/skills
-!/skills/pinner
-!/skills/pinner/SKILL.md
+!/hooks
+!/hooks/hooks.json
+!/hooks/inject-pins.sh
