@@ -16,8 +16,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pinCmd = &cobra.Command{
-	Use:   "pin <name> [files...]",
+var addCmd = &cobra.Command{
+	Use:   "add <name> [files...]",
 	Short: "Create a pin for a group of files",
 	Long:  "Create a pin for a group of files",
 	Args:  cobra.MatchAll(cobra.MinimumNArgs(1), validateArgs),
@@ -36,7 +36,7 @@ func validateArgs(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(pinCmd)
+	rootCmd.AddCommand(addCmd)
 }
 
 type frontmatter struct {
