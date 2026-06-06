@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	PIN_DIR    = "pins"
+	PIN_DIR    = ".pins"
 	PIN_FILE   = "PIN.md"
 	INDEX_FILE = "INDEX.md"
 )
