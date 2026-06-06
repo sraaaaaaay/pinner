@@ -57,9 +57,10 @@ func pin(cmd *cobra.Command, args []string) {
 		kw := getKeywords()
 		names := dedupeNames(files)
 		sources := createFileSources(files, name, names)
+		hashToComment := getComments(sources)
 
 		createFrontmatter(name, kw, sources)
-		createCopies(dir, files, names)
+		createCopies(dir, sources, hashToComment)
 		index()
 	}
 }
@@ -113,15 +114,6 @@ func getKeywords() []byte {
 	return bytes.TrimSpace(kw)
 }
 
-func createCopies(dir string, fileArgs []string, names []string) {
-	for i, file := range fileArgs {
-		dst := filepath.Join(dir, names[i]+".md")
-		if err := copyAsMarkdown(file, dst); err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
 func dedupeNames(fileArgs []string) []string {
 	counts := map[string]int{}
 	for _, file := range fileArgs {
@@ -140,7 +132,16 @@ func dedupeNames(fileArgs []string) []string {
 	return names
 }
 
-func copyAsMarkdown(src, dst string) error {
+func createCopies(dir string, sources []filesource, hashToComment map[string]string) {
+	for _, src := range sources {
+		dst := fmt.Sprintf("%s/%s%s", dir, filepath.Base(src.Source), ".md")
+		if err := copyAsMarkdown(src.Source, dst, hashToComment[src.Sha256]); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func copyAsMarkdown(src, dst, comment string) error {
 	content, err := os.ReadFile(src)
 	if err != nil {
 		return err
@@ -150,14 +151,15 @@ func copyAsMarkdown(src, dst string) error {
 		return err
 	}
 
-	return os.WriteFile(dst, asMarkdown(src, content), 0644)
+	return os.WriteFile(dst, asMarkdown(src, comment, content), 0644)
 }
 
-func asMarkdown(src string, content []byte) []byte {
+func asMarkdown(src string, comment string, content []byte) []byte {
 	lang := strings.TrimPrefix(filepath.Ext(src), ".")
 	fence := strings.Repeat("`", max(3, longestBacktickRun(content)+1))
 
 	var b bytes.Buffer
+	fmt.Fprintf(&b, "---\ncomment: %s---\n\n", comment)
 	fmt.Fprintf(&b, "%s%s\n", fence, lang)
 	b.Write(content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
@@ -205,6 +207,20 @@ func createFileSources(fileArgs []string, pinName string, names []string) []file
 	}
 
 	return files
+}
+
+func getComments(sources []filesource) map[string]string {
+	comments := make(map[string]string, len(sources))
+	rd := bufio.NewReader(os.Stdin)
+
+	for _, src := range sources {
+		fmt.Printf("Comments for %s: ", src.Source)
+		if comment, err := rd.ReadString('\n'); err == nil {
+			comments[src.Sha256] = comment
+		}
+	}
+
+	return comments
 }
 
 func createFrontmatter(name string, kw []byte, sources []filesource) {
