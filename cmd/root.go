@@ -13,6 +13,10 @@ const (
 	INDEX_FILE        = "INDEX.md"
 )
 
+func getFuzzyIgnoreDirs() []string {
+	return []string{PIN_DIR, ".git", "node_modules", "vendor"}
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "pinner",
 	Short: "Pin code examples for rediscovery",

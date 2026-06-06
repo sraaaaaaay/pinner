@@ -84,12 +84,14 @@ func pickFiles() []string {
 
 func listFiles(root string) ([]string, error) {
 	var files []string
+	ignoreDirs := getFuzzyIgnoreDirs()
+
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" || path == PIN_DIR {
+			if slices.Contains(ignoreDirs, d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -195,7 +197,7 @@ func createFileSources(fileArgs []string, pinName string, names []string) []file
 
 		files = append(files, filesource{
 			Source:   f.Name(),
-			Snapshot: "./" + filepath.ToSlash(filepath.Join(PIN_DIR, pinName, names[i]+".md")),
+			Snapshot: filepath.ToSlash(filepath.Join(PIN_DIR, pinName, names[i]+".md")),
 			Sha256:   hex.EncodeToString(hasher.Sum(nil)),
 		})
 
@@ -216,7 +218,7 @@ func createFrontmatter(name string, kw []byte, sources []filesource) {
 		log.Fatal(err)
 	}
 
-	err = os.WriteFile(fmt.Sprintf("%s/%s/%s", PIN_DIR, name, PIN_FILE), fmt.Appendf(nil, "---\n%s---", yaml), 0644)
+	err = os.WriteFile(fmt.Sprintf("%s/%s/%s", PIN_DIR, name, PIN_FILE), fmt.Appendf(nil, "---\n%s---\n", yaml), 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
