@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,14 +17,16 @@ var indexCmd = &cobra.Command{
 	Use:   "index",
 	Short: "Create an index of pins",
 	Long:  "Create an index of pins",
-	Run:   index,
+	Run: func(cmd *cobra.Command, args []string) {
+		index()
+	},
 }
 
 func init() {
 	rootCmd.AddCommand(indexCmd)
 }
 
-func index(cmd *cobra.Command, args []string) {
+func index() {
 	if err := os.MkdirAll(PIN_DIR, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -40,6 +43,10 @@ func index(cmd *cobra.Command, args []string) {
 		}
 
 		fm, err := readFrontmatter(fmt.Sprintf("%s/%s/%s", PIN_DIR, entry.Name(), PIN_FILE))
+		if errors.Is(err, os.ErrNotExist) {
+			// Incomplete pin (no PIN.md yet); skip rather than fail the index.
+			continue
+		}
 		if err != nil {
 			log.Fatal(err)
 		}
