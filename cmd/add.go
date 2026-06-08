@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -54,7 +55,11 @@ func pin(cmd *cobra.Command, args []string) {
 			log.Fatal(err)
 		}
 
-		kw := getKeywords()
+		kw, err := getKeywords()
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		names := dedupeNames(files)
 		sources := createFileSources(files, name, names)
 		hashToComment := getComments(sources)
@@ -107,11 +112,21 @@ func listFiles(root string) ([]string, error) {
 	return files, err
 }
 
-func getKeywords() []byte {
+func getKeywords() ([]byte, error) {
 	fmt.Print("Keywords (comma-separated): ")
 	r := bufio.NewReader(os.Stdin)
-	kw, _ := r.ReadBytes('\n')
-	return bytes.TrimSpace(kw)
+	kw, err := r.ReadBytes('\n')
+	kw = bytes.TrimSpace(kw)
+
+	if err != nil {
+		return nil, fmt.Errorf("error getting keywords: %w", err)
+	}
+
+	if len(kw) == 0 {
+		return nil, errors.New("must enter at least 1 keyword")
+	}
+
+	return kw, nil
 }
 
 func dedupeNames(fileArgs []string) []string {
@@ -224,18 +239,17 @@ func getComments(sources []filesource) map[string]string {
 }
 
 func createFrontmatter(name string, kw []byte, sources []filesource) {
-	fm := frontmatter{
-		Keywords: string(kw),
-		Files:    sources,
-	}
+	yaml, err := yaml.MarshalWithOptions(
+		frontmatter{
+			Keywords: string(kw),
+			Files:    sources,
+		}, yaml.IndentSequence(true))
 
-	yaml, err := yaml.MarshalWithOptions(fm, yaml.IndentSequence(true))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = os.WriteFile(fmt.Sprintf("%s/%s/%s", PIN_DIR, name, PIN_FILE), fmt.Appendf(nil, "---\n%s---\n", yaml), 0644)
-	if err != nil {
+	if err = os.WriteFile(fmt.Sprintf("%s/%s/%s", PIN_DIR, name, PIN_FILE), fmt.Appendf(nil, "---\n%s---\n", yaml), 0644); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -316,11 +330,11 @@ func (m model) View() tea.View {
 
 	confirm := ""
 	if len(m.selected) > 0 {
-		confirm = " · enter: confirm"
+		confirm = fmt.Sprintf(" · enter: confirm (%d selected)", len(m.selected))
 	}
 
-	fmt.Fprintf(&b, m.style.Render("\ntab: toggle · ↑/↓: move%s · ctrl+c: cancel  (%d selected)")+"\n", confirm, len(m.selected))
-	fmt.Fprintf(&b, "%s\n", m.ti.View())
+	fmt.Fprintf(&b, m.style.Render("\ntab: toggle · ↑/↓: move · ctrl+c: cancel%s"), confirm)
+	fmt.Fprintf(&b, "\n%s\n", m.ti.View())
 
 	start := max(0, m.cursor-FUZZY_MAX_RESULTS+1)
 	for i := start; i < min(start+FUZZY_MAX_RESULTS, len(m.matches)); i++ {
