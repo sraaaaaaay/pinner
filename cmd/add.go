@@ -12,9 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
@@ -49,25 +51,33 @@ func pin(cmd *cobra.Command, args []string) {
 	name := args[0]
 	fmt.Println("Creating pin: " + name)
 
-	if files := pickFiles(); len(files) > 0 {
-		dir := fmt.Sprintf("%s/%s", PIN_DIR, name)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Fatal(err)
-		}
-
-		kw, err := getKeywords()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		names := dedupeNames(files)
-		sources := createFileSources(files, name, names)
-		hashToComment := getComments(sources)
-
-		createFrontmatter(name, kw, sources)
-		createCopies(dir, sources, hashToComment)
-		index()
+	files := pickFiles()
+	if len(files) == 0 {
+		return
 	}
+
+	fileToLines, ok := pickLines(files)
+	if !ok {
+		return
+	}
+
+	dir := fmt.Sprintf("%s/%s", PIN_DIR, name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Fatal(err)
+	}
+
+	kw, err := getKeywords()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	names := dedupeNames(files)
+	sources := createFileSources(files, name, names)
+	hashToComment := getComments(sources)
+
+	createFrontmatter(name, kw, sources)
+	createCopies(dir, sources, hashToComment, fileToLines)
+	index()
 }
 
 func pickFiles() []string {
@@ -76,16 +86,30 @@ func pickFiles() []string {
 		log.Fatal(err)
 	}
 
-	final, err := tea.NewProgram(newModel(files)).Run()
+	final, err := tea.NewProgram(newFilePicker(files)).Run()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	clearView(final)
+	return final.(filePicker).selected
+}
+
+func pickLines(files []string) (map[string]pickedLine, bool) {
+	final, err := tea.NewProgram(newLinePicker(files)).Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	clearView(final)
+	lp := final.(linePicker)
+	return lp.picked, !lp.aborted
+}
+
+func clearView(final tea.Model) {
 	for range lipgloss.Height(final.View().Content) {
 		fmt.Print("\033[1A\033[2K")
 	}
-
-	return final.(model).selected
 }
 
 func listFiles(root string) ([]string, error) {
@@ -147,26 +171,53 @@ func dedupeNames(fileArgs []string) []string {
 	return names
 }
 
-func createCopies(dir string, sources []filesource, hashToComment map[string]string) {
+func createCopies(dir string, sources []filesource, hashToComment map[string]string, fileToLines map[string]pickedLine) {
 	for _, src := range sources {
+		picked, ok := fileToLines[src.Source]
+		if !ok {
+			picked = pickedLine{start: -1, end: -1}
+		}
+
 		dst := fmt.Sprintf("%s/%s%s", dir, filepath.Base(src.Source), ".md")
-		if err := copyAsMarkdown(src.Source, dst, hashToComment[src.Sha256]); err != nil {
+		if err := copyAsMarkdown(src.Source, dst, hashToComment[src.Sha256], picked); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func copyAsMarkdown(src, dst, comment string) error {
-	content, err := os.ReadFile(src)
+func copyAsMarkdown(src, dst, comment string, picked pickedLine) error {
+	var content bytes.Buffer
+	isWholeFile := picked.start == -1 && picked.end == -1
+
+	if !isWholeFile {
+		content.WriteString("...\n")
+	}
+
+	f, err := os.Open(src)
 	if err != nil {
 		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	l := 0
+	for scanner.Scan() {
+		if isWholeFile || l >= picked.start && l <= picked.end {
+			content.Write(scanner.Bytes())
+			content.WriteRune('\n')
+			l++
+		}
+	}
+
+	if !isWholeFile {
+		content.WriteString("...\n")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 
-	return os.WriteFile(dst, asMarkdown(src, comment, content), 0644)
+	return os.WriteFile(dst, asMarkdown(src, comment, content.Bytes()), 0644)
 }
 
 func asMarkdown(src string, comment string, content []byte) []byte {
@@ -254,30 +305,36 @@ func createFrontmatter(name string, kw []byte, sources []filesource) {
 	}
 }
 
-type model struct {
+var hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))
+var highlight = lipgloss.NewStyle().Background(lipgloss.Color("237"))
+
+type filePicker struct {
 	ti       textinput.Model
-	style    lipgloss.Style
 	files    []string
 	matches  []string
 	selected []string
 	cursor   int
 }
 
-func newModel(files []string) model {
+func newFilePicker(files []string) filePicker {
 	ti := textinput.New()
 	ti.Prompt = "Search files: "
 	ti.Focus()
 
-	m := model{ti: ti, files: files, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))}
+	m := filePicker{
+		ti:    ti,
+		files: files,
+	}
+
 	m.filter()
 	return m
 }
 
-func (m model) Init() tea.Cmd {
+func (m filePicker) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m *model) filter() {
+func (m *filePicker) filter() {
 	m.matches = m.files
 	if query := m.ti.Value(); query != "" {
 		m.matches = nil
@@ -288,7 +345,7 @@ func (m *model) filter() {
 	m.cursor = min(m.cursor, max(0, len(m.matches)-1))
 }
 
-func (m *model) toggle(path string) {
+func (m *filePicker) toggle(path string) {
 	if i := slices.Index(m.selected, path); i >= 0 {
 		m.selected = slices.Delete(m.selected, i, i+1)
 	} else {
@@ -296,7 +353,7 @@ func (m *model) toggle(path string) {
 	}
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m filePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
@@ -325,7 +382,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() tea.View {
+func (m filePicker) View() tea.View {
 	var b strings.Builder
 
 	confirm := ""
@@ -333,7 +390,7 @@ func (m model) View() tea.View {
 		confirm = fmt.Sprintf(" · enter: confirm (%d selected)", len(m.selected))
 	}
 
-	fmt.Fprintf(&b, m.style.Render("\ntab: toggle · ↑/↓: move · ctrl+c: cancel%s"), confirm)
+	fmt.Fprintf(&b, hintStyle.Render("\ntab: toggle · ↑/↓: move · ctrl+c: cancel%s"), confirm)
 	fmt.Fprintf(&b, "\n%s\n", m.ti.View())
 
 	start := max(0, m.cursor-FUZZY_MAX_RESULTS+1)
@@ -350,5 +407,167 @@ func (m model) View() tea.View {
 	if len(m.matches) == 0 {
 		b.WriteString("  (no matches)\n")
 	}
+
+	return tea.NewView(b.String())
+}
+
+type pickedLine struct {
+	start int
+	end   int
+}
+
+type linePicker struct {
+	vp             viewport.Model
+	files          []string
+	picked         map[string]pickedLine
+	markingFileIdx int
+	lineCursor     int
+	pendingStart   int
+	aborted        bool
+}
+
+func newLinePicker(files []string) linePicker {
+	vp := viewport.New()
+	vp.FillHeight = true
+	vp.SoftWrap = true
+
+	m := linePicker{
+		vp:           vp,
+		files:        files,
+		picked:       map[string]pickedLine{},
+		pendingStart: -1,
+	}
+
+	m.loadFile(0)
+	return m
+}
+
+func (m linePicker) Init() tea.Cmd {
+	return nil
+}
+
+func (m linePicker) currentFile() string {
+	return m.files[m.markingFileIdx]
+}
+
+func (m *linePicker) loadFile(i int) {
+	b, err := os.ReadFile(m.files[i])
+	if err != nil {
+		log.Fatal(err)
+	}
+	m.markingFileIdx = i
+	m.lineCursor = 0
+	m.pendingStart = -1
+	m.vp.SetContent(string(b))
+	m.vp.GotoTop()
+}
+
+func (m *linePicker) markLine() {
+	// If we hit space again after selecting start/end, clear the selection
+	if _, done := m.picked[m.currentFile()]; done {
+		delete(m.picked, m.currentFile())
+		return
+	}
+
+	if m.pendingStart < 0 {
+		m.pendingStart = m.lineCursor
+		return
+	}
+
+	m.picked[m.currentFile()] = pickedLine{
+		start: min(m.pendingStart, m.lineCursor),
+		end:   max(m.pendingStart, m.lineCursor),
+	}
+
+	m.pendingStart = -1
+}
+
+func (m linePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if wsMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.vp.SetWidth(wsMsg.Width)
+		m.vp.SetHeight(wsMsg.Height - 1)
+	}
+
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	}
+
+	switch k := key.Key(); {
+	case k.Mod.Contains(tea.ModCtrl) && k.Code == 'c':
+		m.aborted = true
+		return m, tea.Quit
+	case k.Code == tea.KeyUp && m.lineCursor > 0:
+		m.lineCursor--
+		m.vp.EnsureVisible(m.lineCursor, 0, 0)
+	case k.Code == tea.KeyDown && m.lineCursor < m.vp.TotalLineCount()-1:
+		m.lineCursor++
+		m.vp.EnsureVisible(m.lineCursor, 0, 0)
+	case k.Code == tea.KeySpace:
+		m.markLine()
+	case k.Code == tea.KeyEnter:
+		if m.pendingStart >= 0 {
+			m.markLine()
+		}
+		if m.markingFileIdx+1 >= len(m.files) {
+			return m, tea.Quit
+		}
+		m.loadFile(m.markingFileIdx + 1)
+	}
+
+	return m, nil
+}
+
+func (m linePicker) View() tea.View {
+	picked, done := m.picked[m.currentFile()]
+
+	status := "whole file"
+	if done {
+		status = fmt.Sprintf("lines %d-%d", picked.start+1, picked.end+1)
+	} else if m.pendingStart >= 0 {
+		status = fmt.Sprintf("start: line %d", m.pendingStart+1)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", hintStyle.Render(fmt.Sprintf(
+		"%s (%d/%d) · %s · ↑/↓: move · space: mark · enter: confirm",
+		m.currentFile(), m.markingFileIdx+1, len(m.files), status)))
+
+	m.vp.LeftGutterFunc = func(gc viewport.GutterContext) string {
+		cursor, marker, number := " ", " ", " "
+
+		if !gc.Soft {
+			if gc.Index <= gc.TotalLines {
+				number = strconv.Itoa(gc.Index + 1)
+			} else {
+				number = "~"
+			}
+
+			if gc.Index == m.lineCursor {
+				cursor = ">"
+			}
+
+			if (gc.Index == m.pendingStart) || (done && gc.Index == picked.start) {
+				marker = "S"
+			}
+
+			if done && gc.Index == picked.end {
+				marker = "E"
+			}
+		}
+
+		return fmt.Sprintf("%-1s%2s%4s %-2s", cursor, marker, number, "│")
+	}
+
+	m.vp.StyleLineFunc = func(i int) lipgloss.Style {
+		if (done && i >= picked.start && i <= picked.end) || i == m.pendingStart {
+			return highlight
+		}
+		return lipgloss.NewStyle()
+	}
+
+	b.WriteString(m.vp.View())
 	return tea.NewView(b.String())
 }
